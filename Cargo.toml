@@ -23,6 +23,31 @@ zbus = { version = "5.11", default-features = false, features = ["tokio"] }
 http-body-util = { version = "0.1", default-features = false }
 serde_json = { version = "1.0", default-features = false }
 anyhow = { version = "1.0", default-features = false }
+# Core instrumentation library
+tracing = "0.1"
+
+# The subscriber/layer that collects, processes, and formats the instrumentation data.
+# We include the 'fmt' feature for console output and 'env-filter' to use RUST_LOG.
+# tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "chrono"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "chrono"] }
+
+###############
+# more settings
+###############
+
+# [dependencies]
+# Core instrumentation library
+# tracing = "0.1"
+
+# The subscriber/layer that collects and processes the instrumentation data
+# "FMT" is a powerful and popular option for CLIs, as it formats output nicely
+# tracing-subscriber = { version = "0.3", features = ["fmt"] }
+
+# Optional: For better debugging of async/concurrent code (highly recommended)
+
+tracing-appender = "0.2" # Use this if you need file logging
+# tokio = { version = "1", features = ["full"] } # If your program uses tokio
+
 
 [build-dependencies]
 uefi-reset = { version = "1.0", artifact = "bin", target = "x86_64-unknown-uefi" }
