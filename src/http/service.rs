@@ -21,6 +21,7 @@ const POWEROFF_EFI: &[u8] = include_bytes!(env!("POWEROFF_BIN_PATH"));
 const EMPTY: &[u8] = &[];
 
 /// Main HTTP service that handles all requests
+#[derive(Debug)]
 pub struct Service {
     remote: IpAddr,
     status: Arc<Mutex<Status>>,
@@ -52,7 +53,33 @@ impl hyper::service::Service<Request<Incoming>> for Service {
     type Error = anyhow::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
+    // #[tracing::instrument(level = "info", name = "http_request", skip(self, req), fields(ip = %self.remote, method = %req.method(), path = %req.uri().path()))]
+    #[tracing::instrument(level = "info", 
+                            name = "http_request", 
+                            skip(self, req))]
     fn call(&self, req: Request<Incoming>) -> Self::Future {
+
+
+        // 1. Get the current span created by the macro
+        let span = tracing::Span::current();
+
+        // 2. Create the owned values 
+        //    (The .clone() and .to_string() methods must be called here)
+        let ip = self.remote.clone(); 
+        let method = req.method().clone();
+        let path = req.uri().path().to_string(); // Use .to_string() for the owned String
+
+        // 3. Record the owned values onto the span
+        //    Note: The `req` is passed by value, so we must record fields before awaiting.
+        span.record("ip", &tracing::field::display(ip));
+        span.record("method", &tracing::field::display(method));
+        span.record("path", &tracing::field::display(path));
+
+
+
+
+
+
         let status = self.status.clone();
         let client = self.client.clone();
         let github = self.github.clone();
@@ -67,30 +94,44 @@ impl hyper::service::Service<Request<Incoming>> for Service {
             let (response, ct) = match *req.method() {
                 // The POST request is used to signal the start of a job.
                 Method::POST => {
+                    tracing::info!(ip = %remote, "received boot beacon");
                     if status.lock().await.update().booting(remote) {
+                        tracing::info!(ip = %remote, "boot beacon accepted");
                         return Ok(EMPTY.reply(None, None, None));
                     }
 
+                    tracing::warn!(ip = %remote, "boot beacon rejected - no downloading job for this IP");
                     return Ok(EMPTY.reply(Code::EXPECTATION_FAILED, None, None));
                 }
 
                 // The PUT request is used to report completion of a job.
                 Method::PUT => {
+                    tracing::info!(ip = %remote, "received job report");
                     // Collect the request body
                     let bytes = req.into_body().collect().await?.to_bytes();
                     let report: Report = match serde_json::from_slice(&bytes) {
-                        Err(..) => return Ok(EMPTY.reply(Code::BAD_REQUEST, None, None)),
-                        Ok(report) => report,
+                        Err(..) => {
+                            tracing::warn!(ip = %remote, "invalid report payload");
+                            return Ok(EMPTY.reply(Code::BAD_REQUEST, None, None));
+                        }
+                        Ok(report_value) => {
+                            let report: Report = report_value;
+                            // tracing::info!(ip = %remote, title = %report.title, "parsed report");
+                            tracing::info!(ip = %remote, "parsed report");
+                            report
+                        }
                     };
 
                     // Display that the job has been reported.
                     if !status.lock().await.update().report(remote) {
+                        tracing::warn!(ip = %remote, "report rejected - no booting job for this IP");
                         return Ok(EMPTY.reply(Code::EXPECTATION_FAILED, None, None));
                     }
 
                     // Create a GitHub issue for the report.
                     let reported = tokio::time::Instant::now();
                     if github.report(report).await.is_err() {
+                        tracing::error!(ip = %remote, "failed to create GitHub issue for report");
                         return Ok(EMPTY.reply(Code::INTERNAL_SERVER_ERROR, None, None));
                     }
 
@@ -100,28 +141,41 @@ impl hyper::service::Service<Request<Incoming>> for Service {
                         status.lock().await.update().finish(remote);
                     });
 
+                    tracing::info!(ip = %remote, "report accepted and GitHub issue created");
                     return Ok(EMPTY.reply(None, None, None));
                 }
 
                 // The HEAD request is used to get information about the assigned asset.
                 Method::HEAD => {
+                    tracing::info!(ip = %remote, "HEAD request - checking for assignment");
                     match status.clone().assign(remote).await {
                         // No asset assigned, return poweroff EFI binary.
-                        None => return Ok(POWEROFF_EFI.reply(None, Type::Efi, EMPTY)),
+                        None => {
+                            tracing::info!(ip = %remote, "no asset assigned - serving poweroff");
+                            return Ok(POWEROFF_EFI.reply(None, Type::Efi, EMPTY));
+                        }
 
                         // Send the request (possibly redirecting...)
-                        Some(asset) => (client.head(asset.url).send().await?, asset.mime),
+                        Some(asset) => {
+                            tracing::info!(ip = %remote, asset = %asset.name, size = asset.size, "assigned asset found");
+                            (client.head(asset.url).send().await?, asset.mime)
+                        }
                     }
                 }
 
                 // The GET request is used to fetch the assigned asset.
                 Method::GET => {
+                    tracing::info!(ip = %remote, "GET request - checking for assignment");
                     match status.clone().assign(remote).await {
                         // No asset assigned, return poweroff EFI binary.
-                        None => return Ok(POWEROFF_EFI.reply(None, Type::Efi, None)),
+                        None => {
+                            tracing::info!(ip = %remote, "no asset assigned - serving poweroff");
+                            return Ok(POWEROFF_EFI.reply(None, Type::Efi, None));
+                        }
 
                         // Send the request (possibly redirecting...)
                         Some(asset) => {
+                            tracing::info!(ip = %remote, asset = %asset.name, size = asset.size, "starting asset download");
                             let response = client.get(asset.url).send().await?;
                             status.lock().await.update().downloading(remote);
                             (response, asset.mime)

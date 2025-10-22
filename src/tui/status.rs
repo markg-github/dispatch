@@ -99,6 +99,7 @@ impl Drop for Update<'_> {
     }
 }
 
+#[derive(Debug)]
 pub struct Status {
     jobs: Jobs,
     addr: SocketAddr,
