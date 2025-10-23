@@ -110,11 +110,13 @@ async fn main() -> Result<()> {
 
     // Create TXT records
     let name = std::env!("CARGO_PKG_NAME");
+    tracing::debug!(name);
     let txt = [
         ("description", std::env!("CARGO_PKG_DESCRIPTION")),
         ("version", std::env!("CARGO_PKG_VERSION")),
         ("path", &path),
     ];
+    tracing::debug!(txt = ?txt);
 
     // Start the Avahi service discovery.
     let avahi = AvahiService::new().await?;
