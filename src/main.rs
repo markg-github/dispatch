@@ -109,7 +109,9 @@ async fn main() -> Result<()> {
     let server = Server::new(listener, status.clone(), github, path.clone())?;
 
     // Create TXT records
-    let name = std::env!("CARGO_PKG_NAME");
+    // Use package name plus port to ensure Avahi service names are unique
+    // when running multiple instances on the same host.
+    let name = format!("{}-{}", std::env!("CARGO_PKG_NAME"), addr.port());
     tracing::debug!(name);
     let txt = [
         ("description", std::env!("CARGO_PKG_DESCRIPTION")),
@@ -120,7 +122,7 @@ async fn main() -> Result<()> {
 
     // Start the Avahi service discovery.
     let avahi = AvahiService::new().await?;
-    avahi.register(name, addr.port(), &txt).await?;
+    avahi.register(name.as_str(), addr.port(), &txt).await?;
 
     // Create event stream for terminal events
     let mut events = EventStream::new();

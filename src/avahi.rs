@@ -69,7 +69,11 @@ impl AvahiService {
 
     /// Register an HTTP service
     pub async fn register(&self, name: &str, port: u16, txt: &[(&str, &str)]) -> Result<()> {
-        let service_type = format!("_{name}._tcp");
+        // Service type should be the fixed dispatch service type (based on the
+        // package name). The `name` parameter is the instance/display name
+        // (which we may include the port in) and must not change the service
+        // type; beacon browses for the fixed service type.
+        let service_type = format!("_{}._tcp", std::env!("CARGO_PKG_NAME"));
 
         // Convert TXT records to the format expected by Avahi
         let txt: Vec<Vec<u8>> = txt
