@@ -34,6 +34,35 @@ trait AvahiEntryGroup {
 
     /// Commit the entry group
     fn commit(&self) -> zbus::Result<()>;
+
+    /// Reset the entry group (clears services so they can be re-added)
+    fn reset(&self) -> zbus::Result<()>;
+
+    /// Get the current state of the entry group
+    fn get_state(&self) -> zbus::Result<i32>;
+}
+
+/// Avahi entry group states (mapped from Avahi integer codes)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryGroupState {
+    Uncommitted,   // 0
+    Registering,   // 1
+    Established,   // 2
+    Collision,     // 3
+    Failure,       // 4
+}
+
+impl EntryGroupState {
+    fn from_raw(v: i32) -> Option<Self> {
+        match v {
+            0 => Some(Self::Uncommitted),
+            1 => Some(Self::Registering),
+            2 => Some(Self::Established),
+            3 => Some(Self::Collision),
+            4 => Some(Self::Failure),
+            _ => None,
+        }
+    }
 }
 
 /// Avahi service registration wrapper
@@ -97,6 +126,36 @@ impl AvahiService {
             .await
             .context("Failed to commit entry group")?;
 
+        // Log the entry group state after commit
+        match self.state().await {
+            Ok(state) => {
+                tracing::info!(
+                    service_name = %name,
+                    port = port,
+                    avahi_state = ?state,
+                    "Avahi entry group committed"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    service_name = %name,
+                    port = port,
+                    error = %e,
+                    "Unable to fetch Avahi entry group state after commit"
+                );
+            }
+        }
+
         Ok(())
+    }
+
+    /// Query the current Avahi entry group state
+    pub async fn state(&self) -> Result<EntryGroupState> {
+        let raw = self.entry_group
+            .get_state()
+            .await
+            .context("Failed to get Avahi entry group state")?;
+        EntryGroupState::from_raw(raw)
+            .context("Unknown Avahi entry group state value")
     }
 }

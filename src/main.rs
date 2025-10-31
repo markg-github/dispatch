@@ -20,6 +20,7 @@ use std::sync::Arc;
 // use std::sync;
 
 use crate::avahi::AvahiService;
+// use crate::avahi::{AvahiService, EntryGroupState};
 use crate::github::GitHubArgs;
 use crate::http::Server;
 use crate::tui::{Status, Throbbing};
@@ -123,14 +124,52 @@ async fn main() -> Result<()> {
     // Start the Avahi service discovery.
     let avahi = AvahiService::new().await?;
     avahi.register(name.as_str(), addr.port(), &txt).await?;
+    tracing::info!(
+        service_name = %name,
+        port = addr.port(),
+        "Avahi initial registration complete"
+    );
 
     // Create event stream for terminal events
     let mut events = EventStream::new();
+
+    // Periodic Avahi state monitoring (logging only, no recovery)
+    let avahi_task = {
+        let name_clone = name.clone();
+        let port = addr.port();
+        async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                match avahi.state().await {
+                    Ok(state) => {
+                        tracing::debug!(
+                            service_name = %name_clone,
+                            port = port,
+                            avahi_state = ?state,
+                            "Avahi health check"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            service_name = %name_clone,
+                            port = port,
+                            error = %e,
+                            "Failed to query Avahi state"
+                        );
+                    }
+                }
+            }
+        }
+    };
 
     // Run the server and wait for quit or terminal events in parallel
     tokio::select! {
         _ = server.serve() => {}
         _ = terminal_events(&mut events, status.clone()) => {}
+        _ = avahi_task => {
+            tracing::warn!("Avahi health monitoring task ended unexpectedly");
+        }
     }
 
     ratatui::restore();
