@@ -23,6 +23,7 @@ zbus = { version = "5.11", default-features = false, features = ["tokio"] }
 http-body-util = { version = "0.1", default-features = false }
 serde_json = { version = "1.0", default-features = false }
 anyhow = { version = "1.0", default-features = false }
+rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
 # Core instrumentation library
 tracing = "0.1"
 

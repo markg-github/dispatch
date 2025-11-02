@@ -20,6 +20,7 @@ use std::sync::Arc;
 // use std::sync;
 
 use crate::avahi::AvahiService;
+// use crate::avahi::{AvahiService, EntryGroupState};
 use crate::github::GitHubArgs;
 use crate::http::Server;
 use crate::tui::{Status, Throbbing};
@@ -74,6 +75,14 @@ struct Args {
     /// When set, do not log to stdout/stderr; only use the rolling log file
     #[arg(long)]
     quiet: bool,
+
+    /// Add a random hex suffix to the Avahi service name (e.g., dispatch-a3f2)
+    #[arg(long)]
+    avahi_random: bool,
+
+    /// Add a custom suffix to the Avahi service name (e.g., dispatch-mytest)
+    #[arg(long, conflicts_with = "avahi_random")]
+    avahi_suffix: Option<String>,
 }
 
 #[tokio::main]
@@ -108,11 +117,17 @@ async fn main() -> Result<()> {
     // Create the HTTP server
     let server = Server::new(listener, status.clone(), github, path.clone())?;
 
-    // Create TXT records
-    // Use package name plus port to ensure Avahi service names are unique
-    // when running multiple instances on the same host.
-    let name = format!("{}-{}", std::env!("CARGO_PKG_NAME"), addr.port());
-    tracing::debug!(name);
+    // Build Avahi service name based on command line options
+    // Clients browse by service type (_dispatch._tcp), not instance name
+    let name = if args.avahi_random {
+        let random_suffix: u16 = rand::random();
+        format!("{}-{:04x}", std::env!("CARGO_PKG_NAME"), random_suffix)
+    } else if let Some(ref suffix) = args.avahi_suffix {
+        format!("{}-{}", std::env!("CARGO_PKG_NAME"), suffix)
+    } else {
+        std::env!("CARGO_PKG_NAME").to_string()
+    };
+    tracing::debug!(avahi_name = %name, "Generated Avahi service name");
     let txt = [
         ("description", std::env!("CARGO_PKG_DESCRIPTION")),
         ("version", std::env!("CARGO_PKG_VERSION")),
@@ -123,14 +138,52 @@ async fn main() -> Result<()> {
     // Start the Avahi service discovery.
     let avahi = AvahiService::new().await?;
     avahi.register(name.as_str(), addr.port(), &txt).await?;
+    tracing::info!(
+        service_name = %name,
+        port = addr.port(),
+        "Avahi initial registration complete"
+    );
 
     // Create event stream for terminal events
     let mut events = EventStream::new();
+
+    // Periodic Avahi state monitoring (logging only, no recovery)
+    let avahi_task = {
+        let name_clone = name.clone();
+        let port = addr.port();
+        async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                match avahi.state().await {
+                    Ok(state) => {
+                        tracing::debug!(
+                            service_name = %name_clone,
+                            port = port,
+                            avahi_state = ?state,
+                            "Avahi health check"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            service_name = %name_clone,
+                            port = port,
+                            error = %e,
+                            "Failed to query Avahi state"
+                        );
+                    }
+                }
+            }
+        }
+    };
 
     // Run the server and wait for quit or terminal events in parallel
     tokio::select! {
         _ = server.serve() => {}
         _ = terminal_events(&mut events, status.clone()) => {}
+        _ = avahi_task => {
+            tracing::warn!("Avahi health monitoring task ended unexpectedly");
+        }
     }
 
     ratatui::restore();
