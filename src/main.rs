@@ -75,6 +75,14 @@ struct Args {
     /// When set, do not log to stdout/stderr; only use the rolling log file
     #[arg(long)]
     quiet: bool,
+
+    /// Add a random hex suffix to the Avahi service name (e.g., dispatch-a3f2)
+    #[arg(long)]
+    avahi_random: bool,
+
+    /// Add a custom suffix to the Avahi service name (e.g., dispatch-mytest)
+    #[arg(long, conflicts_with = "avahi_random")]
+    avahi_suffix: Option<String>,
 }
 
 #[tokio::main]
@@ -109,11 +117,17 @@ async fn main() -> Result<()> {
     // Create the HTTP server
     let server = Server::new(listener, status.clone(), github, path.clone())?;
 
-    // Create TXT records
-    // Use package name plus port to ensure Avahi service names are unique
-    // when running multiple instances on the same host.
-    let name = format!("{}-{}", std::env!("CARGO_PKG_NAME"), addr.port());
-    tracing::debug!(name);
+    // Build Avahi service name based on command line options
+    // Clients browse by service type (_dispatch._tcp), not instance name
+    let name = if args.avahi_random {
+        let random_suffix: u16 = rand::random();
+        format!("{}-{:04x}", std::env!("CARGO_PKG_NAME"), random_suffix)
+    } else if let Some(ref suffix) = args.avahi_suffix {
+        format!("{}-{}", std::env!("CARGO_PKG_NAME"), suffix)
+    } else {
+        std::env!("CARGO_PKG_NAME").to_string()
+    };
+    tracing::debug!(avahi_name = %name, "Generated Avahi service name");
     let txt = [
         ("description", std::env!("CARGO_PKG_DESCRIPTION")),
         ("version", std::env!("CARGO_PKG_VERSION")),
