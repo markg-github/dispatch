@@ -120,8 +120,8 @@ async fn main() -> Result<()> {
     // Build Avahi service name based on command line options
     // Clients browse by service type (_dispatch._tcp), not instance name
     let name = if args.avahi_random {
-        let random_suffix: u16 = rand::random();
-        format!("{}-{:04x}", std::env!("CARGO_PKG_NAME"), random_suffix)
+        let random_suffix: u32 = rand::random();
+        format!("{}-{:08x}", std::env!("CARGO_PKG_NAME"), random_suffix)
     } else if let Some(ref suffix) = args.avahi_suffix {
         format!("{}-{}", std::env!("CARGO_PKG_NAME"), suffix)
     } else {
