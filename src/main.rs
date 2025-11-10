@@ -76,12 +76,12 @@ struct Args {
     #[arg(long)]
     quiet: bool,
 
-    /// Add a random hex suffix to the Avahi service name (e.g., dispatch-a3f2)
+    /// Disable random suffix
     #[arg(long)]
-    avahi_random: bool,
+    no_avahi_random: bool,
 
     /// Add a custom suffix to the Avahi service name (e.g., dispatch-mytest)
-    #[arg(long, conflicts_with = "avahi_random")]
+    #[arg(long, conflicts_with = "no_avahi_random")]
     avahi_suffix: Option<String>,
 }
 
@@ -119,14 +119,34 @@ async fn main() -> Result<()> {
 
     // Build Avahi service name based on command line options
     // Clients browse by service type (_dispatch._tcp), not instance name
-    let name = if args.avahi_random {
-        let random_suffix: u32 = rand::random();
-        format!("{}-{:08x}", std::env!("CARGO_PKG_NAME"), random_suffix)
-    } else if let Some(ref suffix) = args.avahi_suffix {
-        format!("{}-{}", std::env!("CARGO_PKG_NAME"), suffix)
+    // let name = if ! args.no_avahi_random {
+    //     let random_suffix: u32 = rand::random();
+    //     format!("{}-{:08x}", std::env!("CARGO_PKG_NAME"), random_suffix)
+    // } else if let Some(ref suffix) = args.avahi_suffix {
+    //     format!("{}-{}", std::env!("CARGO_PKG_NAME"), suffix)
+    // } else {
+    //     std::env!("CARGO_PKG_NAME").to_string()
+    // };
+
+
+
+
+    let base = std::env!("CARGO_PKG_NAME");
+    let name = if let Some(ref suffix) = args.avahi_suffix {
+        format!("{base}-{suffix}")
+    } else if !args.no_avahi_random {
+        let random_suffix: u16 = rand::random();
+        format!("{base}-{:04x}", random_suffix)
     } else {
-        std::env!("CARGO_PKG_NAME").to_string()
+        base.to_string()
     };
+
+
+
+
+
+
+
     tracing::debug!(avahi_name = %name, "Generated Avahi service name");
     let txt = [
         ("description", std::env!("CARGO_PKG_DESCRIPTION")),
