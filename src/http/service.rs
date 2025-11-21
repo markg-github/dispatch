@@ -12,6 +12,7 @@ use hyper::{Request, Response};
 use reqwest::Client;
 use std::convert::Infallible;
 use tokio::sync::Mutex;
+use tracing::{debug, info, warn, error};
 
 use crate::github::{Asset, GitHub, Report, Type};
 use crate::tui::Status;
@@ -88,6 +89,7 @@ impl hyper::service::Service<Request<Incoming>> for Service {
 
         Box::pin(async move {
             if req.uri().path() != *path {
+                warn!(ip = %remote, requested_path = %req.uri().path(), expected_path = %*path, "path mismatch - returning 404");
                 return Ok(EMPTY.reply(Code::NOT_FOUND, None, None));
             }
 
@@ -157,8 +159,19 @@ impl hyper::service::Service<Request<Incoming>> for Service {
 
                         // Send the request (possibly redirecting...)
                         Some(asset) => {
-                            tracing::info!(ip = %remote, asset = %asset.name, size = asset.size, "assigned asset found");
-                            (client.head(asset.url).send().await?, asset.mime)
+                            tracing::info!(ip = %remote, asset = %asset.name, size = asset.size, url = %asset.url, "HEAD: proxying to upstream");
+                            match client.head(asset.url).send().await {
+                                Ok(resp) => {
+                                    let status_code = resp.status();
+                                    let content_length = resp.headers().get("content-length").and_then(|v| v.to_str().ok());
+                                    tracing::info!(ip = %remote, upstream_status = %status_code, content_length = ?content_length, "HEAD: upstream response received");
+                                    (resp, asset.mime)
+                                }
+                                Err(e) => {
+                                    tracing::error!(ip = %remote, %e, "HEAD: upstream request failed");
+                                    return Ok(EMPTY.reply(Code::BAD_GATEWAY, None, None));
+                                }
+                            }
                         }
                     }
                 }
@@ -175,10 +188,20 @@ impl hyper::service::Service<Request<Incoming>> for Service {
 
                         // Send the request (possibly redirecting...)
                         Some(asset) => {
-                            tracing::info!(ip = %remote, asset = %asset.name, size = asset.size, "starting asset download");
-                            let response = client.get(asset.url).send().await?;
-                            status.lock().await.update().downloading(remote);
-                            (response, asset.mime)
+                            tracing::info!(ip = %remote, asset = %asset.name, size = asset.size, url = %asset.url, "GET: proxying to upstream");
+                            match client.get(asset.url).send().await {
+                                Ok(resp) => {
+                                    let status_code = resp.status();
+                                    let content_length = resp.headers().get("content-length").and_then(|v| v.to_str().ok());
+                                    tracing::info!(ip = %remote, upstream_status = %status_code, content_length = ?content_length, "GET: upstream response received");
+                                    status.lock().await.update().downloading(remote);
+                                    (resp, asset.mime)
+                                }
+                                Err(e) => {
+                                    tracing::error!(ip = %remote, %e, "GET: upstream request failed");
+                                    return Ok(EMPTY.reply(Code::BAD_GATEWAY, None, None));
+                                }
+                            }
                         }
                     }
                 }
@@ -207,12 +230,24 @@ impl hyper::service::Service<Request<Incoming>> for Service {
             }
 
             // Stream the response body directly, mapping errors to Infallible
+            let remote_for_stream = remote;
+            let mut total_bytes: u64 = 0;
             Ok(builder.body(BoxBody::new(StreamBody::new(Box::pin(
-                response.bytes_stream().map(|result| {
-                    result.map_or_else(
-                        |_| Ok(Frame::data(Bytes::new())),
-                        |bytes| Ok(Frame::data(bytes)),
-                    )
+                response.bytes_stream().map(move |result| {
+                    match result {
+                        Ok(bytes) => {
+                            total_bytes += bytes.len() as u64;
+                            // Log first chunk and periodically (every 10MB)
+                            if total_bytes <= 1024 * 1024 || total_bytes % (10 * 1024 * 1024) < bytes.len() as u64 {
+                                debug!(ip = %remote_for_stream, chunk_bytes = bytes.len(), total_bytes = total_bytes, "streaming chunk");
+                            }
+                            Ok(Frame::data(bytes))
+                        }
+                        Err(e) => {
+                            error!(ip = %remote_for_stream, %e, bytes_streamed = total_bytes, "stream error");
+                            Ok(Frame::data(Bytes::new()))
+                        }
+                    }
                 }),
             ))))?)
         })
