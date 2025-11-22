@@ -12,7 +12,7 @@ use hyper::{Request, Response};
 use reqwest::Client;
 use std::convert::Infallible;
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn, error};
+// use tracing::{debug, info, warn, error};
 
 use crate::github::{Asset, GitHub, Report, Type};
 use crate::tui::Status;
@@ -89,7 +89,7 @@ impl hyper::service::Service<Request<Incoming>> for Service {
 
         Box::pin(async move {
             if req.uri().path() != *path {
-                warn!(ip = %remote, requested_path = %req.uri().path(), expected_path = %*path, "path mismatch - returning 404");
+                tracing::warn!(ip = %remote, requested_path = %req.uri().path(), expected_path = %*path, "path mismatch - returning 404");
                 return Ok(EMPTY.reply(Code::NOT_FOUND, None, None));
             }
 
@@ -239,12 +239,12 @@ impl hyper::service::Service<Request<Incoming>> for Service {
                             total_bytes += bytes.len() as u64;
                             // Log first chunk and periodically (every 10MB)
                             if total_bytes <= 1024 * 1024 || total_bytes % (10 * 1024 * 1024) < bytes.len() as u64 {
-                                debug!(ip = %remote_for_stream, chunk_bytes = bytes.len(), total_bytes = total_bytes, "streaming chunk");
+                                tracing::debug!(ip = %remote_for_stream, chunk_bytes = bytes.len(), total_bytes = total_bytes, "streaming chunk");
                             }
                             Ok(Frame::data(bytes))
                         }
                         Err(e) => {
-                            error!(ip = %remote_for_stream, %e, bytes_streamed = total_bytes, "stream error");
+                            tracing::error!(ip = %remote_for_stream, %e, bytes_streamed = total_bytes, "stream error");
                             Ok(Frame::data(Bytes::new()))
                         }
                     }

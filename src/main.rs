@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
 
     // Setup logging according to --quiet. When quiet is true we only use
     // the rolling file appender; otherwise log to both stderr and rolling file.
-    setup_logging_to_stderr_and_rolling_file("beacon", args.quiet).unwrap();
+    setup_logging_to_stderr_and_rolling_file("dispatch", args.quiet).unwrap();
     test_tracing_fn();
 
     // Ensure we're authenticated with GitHub
@@ -261,6 +261,10 @@ pub fn setup_logging_to_stderr_and_rolling_file(
     //     .with_writer(io::stderr);
 
     let tmp_dir = get_tmp_dir();
+
+    let random_part: u16 = rand::random();
+    let filename_prefix = format!("{filename_prefix}-{random_part:04x}");
+
 
     let file_layer = tracing_subscriber::fmt::layer().pretty().with_writer(
         rolling::RollingFileAppender::builder()
