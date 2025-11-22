@@ -49,11 +49,21 @@ impl Server {
             attempt.stop()
         });
 
+        // Build client with GitHub authentication if token is available
+        let mut client_builder = Client::builder().redirect(policy);
+        
+        if let Some(token) = github.token() {
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert("Authorization", format!("Bearer {token}").parse().unwrap());
+            headers.insert("User-Agent", concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).parse().unwrap());
+            client_builder = client_builder.default_headers(headers);
+        }
+
         Ok(Self {
             listener,
             status,
             github,
-            client: Client::builder().redirect(policy).build()?,
+            client: client_builder.build()?,
             path,
         })
     }

@@ -243,6 +243,11 @@ impl GitHub {
         })
     }
 
+    /// Get the GitHub token if available
+    pub fn token(&self) -> Option<&str> {
+        self.args.token.as_deref()
+    }
+
     pub async fn assets(&self) -> Result<BTreeSet<Asset>> {
         let url = format!(
             "https://api.github.com/repos/{}/{}/releases/tags/{}",
