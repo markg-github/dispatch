@@ -49,13 +49,27 @@ impl Server {
             attempt.stop()
         });
 
+        if let Some(token) = github.token() {
+            let token_preview = if token.len() > 8 { &token[..8] } else { token };
+            tracing::info!(token_present = true, token_preview = token_preview, "Adding GitHub token to client");
+        } else {
+            tracing::warn!("No GitHub token available");
+        }
+
         // Build client with GitHub authentication if token is available
         let mut client_builder = Client::builder().redirect(policy);
         
         if let Some(token) = github.token() {
             tracing::info!(token_present = true, token_prefix = &token[..token.len().min(8)], "GitHub token found, adding Authorization header");
             let mut headers = reqwest::header::HeaderMap::new();
-            headers.insert("Authorization", format!("Bearer {token}").parse().unwrap());
+            if true {
+                headers.insert("Authorization", format!("token {token}").parse().unwrap());
+
+            }
+            else {
+                headers.insert("Authorization", format!("Bearer {token}").parse().unwrap());
+
+            }
             headers.insert("User-Agent", concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).parse().unwrap());
             tracing::debug!(?headers, "Building reqwest client with headers");
             client_builder = client_builder.default_headers(headers);
