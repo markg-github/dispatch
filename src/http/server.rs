@@ -20,8 +20,15 @@ pub struct Server {
 }
 
 impl Server {
-    const REDIRECTS: usize = 2;
-    const DOMAINS: &[&str] = &["githubusercontent.com"];
+    const REDIRECTS: usize = 5;
+    // const DOMAINS: &[&str] = &["githubusercontent.com"];
+    const DOMAINS: &[&str] = &[
+        "githubusercontent.com",
+        "github.com",
+        "objects.githubusercontent.com",
+        "github-production-release-asset",  // S3 bucket prefix
+        "amazonaws.com",  // Allow S3
+    ];
 
     pub fn new(
         listener: TcpListener,
@@ -31,21 +38,31 @@ impl Server {
     ) -> reqwest::Result<Self> {
         let policy = Policy::custom(move |attempt| {
             if attempt.previous().len() > Self::REDIRECTS {
+                tracing::warn!(url = %attempt.url(), "too many redirects, stopping");
                 return attempt.stop();
             }
 
             let Some(host) = attempt.url().host_str() else {
+                tracing::warn!(url = %attempt.url(), "no host in redirect, stopping");
                 return attempt.stop();
             };
 
+            // for domain in Self::DOMAINS {
+            //     if let Some(prefix) = host.strip_suffix(domain) {
+            //         if prefix.is_empty() || prefix.ends_with('.') {
+            //             return attempt.follow();
+            //         }
+            //     }
+            // }
+
             for domain in Self::DOMAINS {
-                if let Some(prefix) = host.strip_suffix(domain) {
-                    if prefix.is_empty() || prefix.ends_with('.') {
-                        return attempt.follow();
-                    }
+                if host.contains(domain) {
+                    tracing::debug!(url = %attempt.url(), host = host, "allowing redirect");
+                    return attempt.follow();
                 }
             }
 
+            tracing::warn!(url = %attempt.url(), host = host, "domain not in allowlist, stopping redirect");
             attempt.stop()
         });
 
