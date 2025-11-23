@@ -263,14 +263,14 @@ pub fn setup_logging_to_stderr_and_rolling_file(
     let tmp_dir = get_tmp_dir();
 
     let random_part: u16 = rand::random();
-    let filename_prefix = format!("{filename_prefix}-{random_part:04x}");
+    let filename_suffix = format!("R{random_part:04x}.log");
 
 
     let file_layer = tracing_subscriber::fmt::layer().pretty().with_writer(
         rolling::RollingFileAppender::builder()
             .rotation(rolling::Rotation::DAILY)
             .filename_prefix(filename_prefix)
-            .filename_suffix("log")
+            .filename_suffix(filename_suffix.as_str())
             .build(&tmp_dir)?,
     );
 

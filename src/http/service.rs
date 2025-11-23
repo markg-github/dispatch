@@ -160,6 +160,7 @@ impl hyper::service::Service<Request<Incoming>> for Service {
                         // Send the request (possibly redirecting...)
                         Some(asset) => {
                             tracing::info!(ip = %remote, asset = %asset.name, size = asset.size, url = %asset.url, "HEAD: proxying to upstream");
+                            tracing::debug!(ip = %remote, url = %asset.url, "Sending HEAD request with client headers");
                             match client.head(asset.url).send().await {
                                 Ok(resp) => {
                                     let status_code = resp.status();

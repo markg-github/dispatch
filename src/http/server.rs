@@ -53,11 +53,17 @@ impl Server {
         let mut client_builder = Client::builder().redirect(policy);
         
         if let Some(token) = github.token() {
+            tracing::info!(token_present = true, token_prefix = &token[..token.len().min(8)], "GitHub token found, adding Authorization header");
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert("Authorization", format!("Bearer {token}").parse().unwrap());
             headers.insert("User-Agent", concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).parse().unwrap());
+            tracing::debug!(?headers, "Building reqwest client with headers");
             client_builder = client_builder.default_headers(headers);
         }
+        else {
+            tracing::warn!("No GitHub token found, proceeding without Authorization header");
+        }
+
 
         Ok(Self {
             listener,
