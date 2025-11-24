@@ -208,8 +208,16 @@ impl GitHub {
         headers.insert("User-Agent", Self::USER_AGENT.parse()?);
 
         if let Some(token) = &args.token {
-            let auth_value = format!("Bearer {token}");
-            headers.insert("Authorization", auth_value.parse()?);
+            if true {
+                let auth_value = format!("token {token}");
+                headers.insert("Authorization", auth_value.parse()?);
+
+            }
+            else {
+                let auth_value = format!("Bearer {token}");
+                headers.insert("Authorization", auth_value.parse()?);
+
+            }
         }
 
         let client = Client::builder().default_headers(headers).build()?;
@@ -253,6 +261,7 @@ impl GitHub {
             "https://api.github.com/repos/{}/{}/releases/tags/{}",
             self.args.owner, self.args.repo, self.args.tag
         );
+        tracing::info!("url: {url}");
 
         let response = self.client.get(&url).send().await?;
         let release: Release = response.json().await?;
@@ -266,6 +275,8 @@ impl GitHub {
                     || self.args.filter.iter().any(|f| asset.name.contains(f))
             })
             .collect::<BTreeSet<_>>();
+
+        tracing::info!("returning Ok");
 
         Ok(assets)
     }

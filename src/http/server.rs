@@ -36,17 +36,21 @@ impl Server {
         github: Arc<GitHub>,
         path: Arc<String>,
     ) -> reqwest::Result<Self> {
+        tracing::info!("Creating server with listener: {:?}", listener.local_addr());
         let policy = Policy::custom(move |attempt| {
+            tracing::info!("Checking redirects");
             if attempt.previous().len() > Self::REDIRECTS {
                 tracing::warn!(url = %attempt.url(), "too many redirects, stopping");
                 return attempt.stop();
             }
 
+            tracing::info!("Checking redirect host");
             let Some(host) = attempt.url().host_str() else {
                 tracing::warn!(url = %attempt.url(), "no host in redirect, stopping");
                 return attempt.stop();
             };
 
+            tracing::info!(url = %attempt.url(), host = host, "Checking if host is in allowlist");
             // for domain in Self::DOMAINS {
             //     if let Some(prefix) = host.strip_suffix(domain) {
             //         if prefix.is_empty() || prefix.ends_with('.') {
@@ -88,6 +92,7 @@ impl Server {
 
             }
             headers.insert("User-Agent", concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).parse().unwrap());
+            headers.insert("Accept", format!("Accept: application/octet-stream").parse().unwrap());
             tracing::debug!(?headers, "Building reqwest client with headers");
             client_builder = client_builder.default_headers(headers);
         }
