@@ -55,6 +55,7 @@ impl<K, U> Knowable<K, U> {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
 pub struct Asset<T = Type> {
+    pub id: u64,
     pub name: String,
     pub size: u64,
 
@@ -68,6 +69,7 @@ pub struct Asset<T = Type> {
 impl Asset<Knowable<Type, String>> {
     fn known(self) -> Option<Asset> {
         self.mime.known().map(|mime| Asset {
+            id: self.id,
             name: self.name,
             size: self.size,
             url: self.url,
@@ -115,6 +117,10 @@ pub struct GitHubArgs {
     /// Release tag to download assets from
     #[arg(short = 't', long)]
     pub tag: String,
+
+    /// Use private repository asset download (requires asset IDs)
+    #[arg(long)]
+    pub private: bool,
 
     /// Filter asset names
     #[arg(trailing_var_arg = true)]
@@ -256,27 +262,85 @@ impl GitHub {
         self.args.token.as_deref()
     }
 
+    /// Check if this is a private repository
+    pub fn is_private(&self) -> bool {
+        self.args.private
+    }
+
+    /// Get the owner name
+    pub fn owner(&self) -> &str {
+        &self.args.owner
+    }
+
+    /// Get the repo name
+    pub fn repo(&self) -> &str {
+        &self.args.repo
+    }
+
     pub async fn assets(&self) -> Result<BTreeSet<Asset>> {
         let url = format!(
             "https://api.github.com/repos/{}/{}/releases/tags/{}",
             self.args.owner, self.args.repo, self.args.tag
         );
-        tracing::info!("url: {url}");
+        tracing::info!("Fetching release assets from: {url}");
 
         let response = self.client.get(&url).send().await?;
+        tracing::debug!("Response status: {}", response.status());
+        
         let release: Release = response.json().await?;
-
+        
+        tracing::info!("Found {} total assets in release", release.assets.len());
+        
+        let mut known_count = 0;
+        let mut unknown_count = 0;
+        
         let assets = release
             .assets
             .into_iter()
+            .inspect(|asset| {
+                if let Some(known) = asset.clone().known() {
+                    known_count += 1;
+                    tracing::debug!(
+                        "Known asset: id={}, name='{}', size={} bytes, type={:?}",
+                        known.id,
+                        known.name,
+                        known.size,
+                        known.mime
+                    );
+                } else {
+                    unknown_count += 1;
+                    tracing::debug!("Unknown asset type: id={}, name='{}'", asset.id, asset.name);
+                }
+            })
             .filter_map(Asset::known)
             .filter(|asset| {
-                self.args.filter.is_empty()
-                    || self.args.filter.iter().any(|f| asset.name.contains(f))
+                let matches = self.args.filter.is_empty()
+                    || self.args.filter.iter().any(|f| asset.name.contains(f));
+                
+                if !matches {
+                    tracing::debug!("Filtered out asset: '{}'", asset.name);
+                }
+                
+                matches
             })
             .collect::<BTreeSet<_>>();
 
-        tracing::info!("returning Ok");
+        tracing::info!(
+            "Asset summary: {} known dispatch types, {} unknown types, {} after filtering",
+            known_count,
+            unknown_count,
+            assets.len()
+        );
+        
+        for asset in &assets {
+            tracing::info!(
+                "Selected asset: id={}, name='{}' ({} bytes, {})",
+                asset.id,
+                asset.name,
+                asset.size,
+                asset.mime.content_type()
+            );
+        }
 
         Ok(assets)
     }

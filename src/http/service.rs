@@ -159,9 +159,26 @@ impl hyper::service::Service<Request<Incoming>> for Service {
 
                         // Send the request (possibly redirecting...)
                         Some(asset) => {
-                            tracing::info!(ip = %remote, asset = %asset.name, size = asset.size, url = %asset.url, "HEAD: proxying to upstream");
-                            tracing::debug!(ip = %remote, url = %asset.url, "Sending HEAD request with client headers");
-                            match client.head(asset.url).send().await {
+                            let download_url = if github.is_private() {
+                                format!(
+                                    "https://api.github.com/repos/{}/{}/releases/assets/{}",
+                                    github.owner(),
+                                    github.repo(),
+                                    asset.id
+                                )
+                            } else {
+                                asset.url.clone()
+                            };
+
+                            tracing::info!(ip = %remote, asset = %asset.name, asset_id = asset.id, size = asset.size, url = %download_url, is_private = github.is_private(), "HEAD: proxying to upstream");
+                            tracing::debug!(ip = %remote, url = %download_url, "Sending HEAD request with client headers");
+                            
+                            let mut request = client.head(&download_url);
+                            if github.is_private() {
+                                request = request.header("Accept", "application/octet-stream");
+                            }
+                            
+                            match request.send().await {
                                 Ok(resp) => {
                                     let status_code = resp.status();
                                     let content_length = resp.headers().get("content-length").and_then(|v| v.to_str().ok());
@@ -189,8 +206,25 @@ impl hyper::service::Service<Request<Incoming>> for Service {
 
                         // Send the request (possibly redirecting...)
                         Some(asset) => {
-                            tracing::info!(ip = %remote, asset = %asset.name, size = asset.size, url = %asset.url, "GET: proxying to upstream");
-                            match client.get(asset.url).send().await {
+                            let download_url = if github.is_private() {
+                                format!(
+                                    "https://api.github.com/repos/{}/{}/releases/assets/{}",
+                                    github.owner(),
+                                    github.repo(),
+                                    asset.id
+                                )
+                            } else {
+                                asset.url.clone()
+                            };
+
+                            tracing::info!(ip = %remote, asset = %asset.name, asset_id = asset.id, size = asset.size, url = %download_url, is_private = github.is_private(), "GET: proxying to upstream");
+                            
+                            let mut request = client.get(&download_url);
+                            if github.is_private() {
+                                request = request.header("Accept", "application/octet-stream");
+                            }
+                            
+                            match request.send().await {
                                 Ok(resp) => {
                                     let status_code = resp.status();
                                     let content_length = resp.headers().get("content-length").and_then(|v| v.to_str().ok());
